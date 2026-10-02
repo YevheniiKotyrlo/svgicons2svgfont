@@ -752,6 +752,25 @@ describe('Respecting the fill-rule', () => {
     );
   });
 
+  test.each([
+    ['a quadratic curve', 'M2 2H22V22H2Z M7 7Q7 17 17 17L17 7Z'],
+    [
+      'smooth cubic curves',
+      'M2 12C2 6 6 2 12 2S22 6 22 12S18 22 12 22S2 18 2 12Z',
+    ],
+    ['smooth quadratic curves', 'M2 12Q2 2 12 2T22 12T12 22T2 12Z'],
+  ])(
+    'should leave a path drawn with %s untouched when no contour is reversed',
+    async (_name, d) => {
+      const icon = (fillRule: string) =>
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path${fillRule} d="${d}"/></svg>`;
+
+      expect(await generateGlyphPath(icon(' fill-rule="evenodd"'))).toEqual(
+        await generateGlyphPath(icon('')),
+      );
+    },
+  );
+
   test('should produce the same glyph every time', async () => {
     const source = fs.readFileSync(
       join('fixtures', 'icons', 'evenoddicons', 'island.svg'),

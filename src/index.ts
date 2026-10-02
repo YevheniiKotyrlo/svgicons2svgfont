@@ -1,6 +1,11 @@
 import { Transform } from 'stream';
 import Sax, { type Tag } from 'sax';
-import { SVGPathData, SVGShapes, type SVGCommand } from 'svg-pathdata';
+import {
+  SVGPathData,
+  SVGPathDataTransformer,
+  SVGShapes,
+  type SVGCommand,
+} from 'svg-pathdata';
 import {
   type Matrix,
   scale,
@@ -278,8 +283,11 @@ function findEnclosingContour(
 // Fonts fill by the nonzero rule: an evenodd hole must wind against its outline
 function windEvenOddAsNonZero(pathData: SVGPathData): SVGPathData {
   const contours = splitContours(
-    new SVGPathData(pathData.encode()).toAbs().normalizeST().qtToC().aToC()
-      .commands,
+    new SVGPathData(pathData.commands.map(SVGPathDataTransformer.CLONE()))
+      .toAbs()
+      .normalizeST()
+      .qtToC()
+      .aToC().commands,
   );
 
   if (2 > contours.length) {
