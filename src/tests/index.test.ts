@@ -393,6 +393,12 @@ describe('Generating fonts to files', () => {
       fontName: 'onlywithry',
     });
   });
+
+  test('should not draw never-rendered elements', async () => {
+    await generateFontToFile({
+      fontName: 'neverrenderedicons',
+    });
+  });
 });
 
 describe('Generating fonts to memory', () => {
@@ -606,6 +612,52 @@ describe('Passing code points', () => {
   });
 });
 
+describe('Skipping never-rendered elements', () => {
+  const square =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+    '<path d="M4 4H10V10H4Z" /></svg>';
+
+  test.each(['clippath', 'mask', 'pattern', 'marker', 'symbol', 'defs'])(
+    'should draw the %s icon as its square alone',
+    async (name) => {
+      expect(
+        await generateGlyphPath(
+          fs.readFileSync(
+            join('fixtures', 'icons', 'neverrenderedicons', `${name}.svg`),
+            'utf8',
+          ),
+        ),
+      ).toEqual(await generateGlyphPath(square));
+    },
+  );
+
+  test('should take the glyph color from what it draws', async () => {
+    let colors: (string | undefined)[] = [];
+    const svgFontStream = new SVGIcons2SVGFontStream({
+      round: 1e3,
+      callback: (glyphs) => {
+        colors = glyphs.map(({ color }) => color);
+      },
+    });
+    const svgIconStream = fs.createReadStream(
+      join('fixtures', 'icons', 'neverrenderedicons', 'clippath.svg'),
+    ) as unknown as SVGIconStream;
+
+    svgIconStream.metadata = {
+      name: 'clippath',
+      unicode: [''],
+    };
+
+    const promise = bufferStream(svgFontStream);
+
+    svgFontStream.write(svgIconStream);
+    svgFontStream.end();
+    await promise;
+
+    expect(colors).toEqual(['#9F9FA9']);
+  });
+});
+
 describe('Providing bad glyphs', () => {
   test('should fail when not providing glyph name', async () => {
     const svgIconStream = fs.createReadStream(
@@ -766,6 +818,31 @@ describe('Providing bad glyphs', () => {
       .write(svgIconStream);
   });
 });
+
+async function generateGlyphPath(source: string) {
+  const svgFontStream = new SVGIcons2SVGFontStream({ round: 1e3 });
+  const svgIconStream = streamtest.fromChunks([
+    Buffer.from(source),
+  ]) as unknown as SVGIconStream;
+
+  svgIconStream.metadata = {
+    name: 'glyph',
+    unicode: [''],
+  };
+
+  const promise = bufferStream(svgFontStream);
+
+  svgFontStream.write(svgIconStream);
+  svgFontStream.end();
+
+  const font = (await promise).toString();
+  const glyph = /<glyph[^>]* d="([^"]*)"/.exec(font);
+
+  if (!glyph) {
+    throw new Error(`No glyph path in the font: ${font}`);
+  }
+  return glyph[1];
+}
 
 async function bufferStream(readableStream: Readable) {
   return await new Promise<Buffer>((resolve, reject) => {
