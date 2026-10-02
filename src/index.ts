@@ -1,6 +1,6 @@
 import { Transform } from 'stream';
 import Sax, { type Tag } from 'sax';
-import { SVGPathData, SVGShapes } from 'svg-pathdata';
+import { SVGPathData, SVGShapes, type SVGCommand } from 'svg-pathdata';
 import {
   type Matrix,
   scale,
@@ -91,6 +91,230 @@ function getTagColor(currTag: Tag, parents: Tag[]) {
   }
 
   return fillVal;
+}
+
+// https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty
+const FILL_RULE_DECLARATION = /(?:^|;)\s*fill-rule\s*:\s*([a-z]+)\s*(?:;|$)/i;
+
+type FillRule = 'nonzero' | 'evenodd';
+
+function parseFillRule(value: string | undefined): FillRule | undefined {
+  const rule = 'string' === typeof value ? value.trim().toLowerCase() : '';
+
+  return 'nonzero' === rule || 'evenodd' === rule ? rule : undefined;
+}
+
+function getTagFillRule(parents: Tag[]): FillRule {
+  for (let index = parents.length - 1; 0 <= index; index--) {
+    const { attributes } = parents[index];
+    const declared =
+      'string' === typeof attributes.style
+        ? FILL_RULE_DECLARATION.exec(attributes.style)
+        : null;
+    const rule =
+      parseFillRule(declared?.[1]) ?? parseFillRule(attributes['fill-rule']);
+
+    if (rule) {
+      return rule;
+    }
+  }
+  return 'nonzero';
+}
+
+const CURVE_STEPS = 8;
+const CONTAINMENT_PROBES = 16;
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+function splitContours(commands: SVGCommand[]): SVGCommand[][] {
+  const contours: SVGCommand[][] = [];
+  let contour: SVGCommand[] = [];
+  let start: Point = { x: 0, y: 0 };
+  let closed = false;
+
+  for (const command of commands) {
+    if (SVGPathData.MOVE_TO === command.type) {
+      if (contour.length) {
+        contours.push(contour);
+      }
+      contour = [command];
+      start = { x: command.x, y: command.y };
+      closed = false;
+      continue;
+    }
+    if (closed) {
+      contours.push(contour);
+      contour = [
+        { type: SVGPathData.MOVE_TO, relative: false, x: start.x, y: start.y },
+      ];
+    }
+    contour.push(command);
+    closed = SVGPathData.CLOSE_PATH === command.type;
+  }
+  if (contour.length) {
+    contours.push(contour);
+  }
+  return contours;
+}
+
+function flattenContour(contour: SVGCommand[]): Point[] {
+  const points: Point[] = [];
+  let x = 0;
+  let y = 0;
+
+  for (const command of contour) {
+    if (
+      SVGPathData.MOVE_TO === command.type ||
+      SVGPathData.LINE_TO === command.type
+    ) {
+      x = command.x;
+      y = command.y;
+      points.push({ x, y });
+    } else if (SVGPathData.HORIZ_LINE_TO === command.type) {
+      x = command.x;
+      points.push({ x, y });
+    } else if (SVGPathData.VERT_LINE_TO === command.type) {
+      y = command.y;
+      points.push({ x, y });
+    } else if (SVGPathData.CURVE_TO === command.type) {
+      for (let step = 1; step <= CURVE_STEPS; step++) {
+        const t = step / CURVE_STEPS;
+        const u = 1 - t;
+
+        points.push({
+          x:
+            u * u * u * x +
+            3 * u * u * t * command.x1 +
+            3 * u * t * t * command.x2 +
+            t * t * t * command.x,
+          y:
+            u * u * u * y +
+            3 * u * u * t * command.y1 +
+            3 * u * t * t * command.y2 +
+            t * t * t * command.y,
+        });
+      }
+      x = command.x;
+      y = command.y;
+    }
+  }
+  return points;
+}
+
+function signedArea(points: Point[]): number {
+  let area = 0;
+
+  for (let index = 0; index < points.length; index++) {
+    const point = points[index];
+    const next = points[(index + 1) % points.length];
+
+    area += point.x * next.y - next.x * point.y;
+  }
+  return area / 2;
+}
+
+function containsPoint(outline: Point[], probe: Point): boolean {
+  let inside = false;
+
+  for (
+    let index = 0, previous = outline.length - 1;
+    index < outline.length;
+    previous = index++
+  ) {
+    const current = outline[index];
+    const prior = outline[previous];
+
+    if (
+      current.y > probe.y !== prior.y > probe.y &&
+      probe.x <
+        ((prior.x - current.x) * (probe.y - current.y)) /
+          (prior.y - current.y) +
+          current.x
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function findEnclosingContour(
+  outlines: Point[][],
+  areas: number[],
+  index: number,
+): number {
+  const ownArea = Math.abs(areas[index]);
+  const outline = outlines[index];
+  const stride = Math.max(1, Math.floor(outline.length / CONTAINMENT_PROBES));
+  const probes = outline.filter(
+    (_point, pointIndex) => 0 === pointIndex % stride,
+  );
+  let enclosing = -1;
+
+  for (let candidate = 0; candidate < outlines.length; candidate++) {
+    const candidateArea = Math.abs(areas[candidate]);
+
+    if (
+      candidate === index ||
+      candidateArea <= ownArea ||
+      (-1 !== enclosing && candidateArea >= Math.abs(areas[enclosing]))
+    ) {
+      continue;
+    }
+
+    const inside = probes.filter((probe) =>
+      containsPoint(outlines[candidate], probe),
+    ).length;
+
+    if (inside * 2 > probes.length) {
+      enclosing = candidate;
+    }
+  }
+  return enclosing;
+}
+
+// Fonts fill by the nonzero rule: an evenodd hole must wind against its outline
+function windEvenOddAsNonZero(pathData: SVGPathData): SVGPathData {
+  const contours = splitContours(
+    new SVGPathData(pathData.encode()).toAbs().normalizeST().qtToC().aToC()
+      .commands,
+  );
+
+  if (2 > contours.length) {
+    return pathData;
+  }
+
+  const outlines = contours.map(flattenContour);
+  const areas = outlines.map(signedArea);
+  const enclosures = outlines.map((_outline, index) =>
+    0 === areas[index] ? -1 : findEnclosingContour(outlines, areas, index),
+  );
+  const windings: number[] = [];
+  const resolveWinding = (index: number): number => {
+    if ('undefined' === typeof windings[index]) {
+      windings[index] =
+        -1 === enclosures[index]
+          ? Math.sign(areas[index])
+          : -resolveWinding(enclosures[index]);
+    }
+    return windings[index];
+  };
+  const reversed = contours.map(
+    (_contour, index) =>
+      0 !== areas[index] && Math.sign(areas[index]) !== resolveWinding(index),
+  );
+
+  if (!reversed.includes(true)) {
+    return pathData;
+  }
+
+  return new SVGPathData(
+    contours.flatMap((contour, index) =>
+      reversed[index] ? new SVGPathData(contour).reverse().commands : contour,
+    ),
+  );
 }
 
 export interface SVGIcons2SVGFontStreamOptions {
@@ -401,7 +625,13 @@ export class SVGIcons2SVGFontStream extends Transform {
           tag.attributes.d &&
           'none' !== tag.attributes.fill
         ) {
-          glyph.paths?.push(applyTransform(tag.attributes.d as string));
+          const pathData = applyTransform(tag.attributes.d as string);
+
+          glyph.paths?.push(
+            'evenodd' === getTagFillRule(parents as Tag[])
+              ? windEvenOddAsNonZero(pathData)
+              : pathData,
+          );
         }
 
         // According to http://www.w3.org/TR/SVG/painting.html#SpecifyingPaint
