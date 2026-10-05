@@ -274,22 +274,15 @@ export class SVGIcons2SVGFontStream extends Transform {
         } else {
           transformStack.push(currentTransform);
         }
+        // Clipping and masking unsupported, however an element references them
+        if ('clipPath' === tag.name || 'mask' === tag.name) {
+          warn(
+            `🤷 - Found a ${tag.name} element in the icon "${glyph.name}" the result may be different than expected.`,
+          );
+        }
         // Checking if any parent rendering is disabled and exit if so
         if (!tagShouldRender(tag as Tag, parents as Tag[])) {
           return;
-        }
-
-        if (
-          ['clip-path', 'mask'].some(
-            (attribute) =>
-              'string' === typeof tag.attributes[attribute] &&
-              'none' !== tag.attributes[attribute],
-          )
-        ) {
-          // Clipping and masking unsupported
-          warn(
-            `🤷 - Found a clipped or masked element in the icon "${glyph.name}", the glyph draws it unclipped.`,
-          );
         }
 
         // Save the view size
