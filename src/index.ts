@@ -173,6 +173,13 @@ interface Point {
   readonly y: number;
 }
 
+interface Bounds {
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
 type PointLocation = 'inside' | 'outside' | 'outline';
 
 function splitContours(commands: readonly SVGCommand[]): SVGCommand[][] {
@@ -262,6 +269,30 @@ function signedArea(points: readonly Point[]): number {
   return area / 2;
 }
 
+function getBounds(points: readonly Point[]): Bounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const { x, y } of points) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function boundsOverlap(first: Bounds, second: Bounds): boolean {
+  return (
+    first.minX <= second.maxX &&
+    second.minX <= first.maxX &&
+    first.minY <= second.maxY &&
+    second.minY <= first.maxY
+  );
+}
+
 function locatePoint(outline: readonly Point[], probe: Point): PointLocation {
   let inside = false;
 
@@ -312,6 +343,7 @@ function canEnclose(
 
 function findEnclosingContour(
   outlines: readonly (readonly Point[])[],
+  bounds: readonly Bounds[],
   areas: readonly number[],
   index: number,
 ): number {
@@ -320,12 +352,14 @@ function findEnclosingContour(
   const probes = outline.filter(
     (_point, pointIndex) => 0 === pointIndex % stride,
   );
+  const probeBounds = getBounds(probes);
   let enclosing = -1;
 
   for (let candidate = 0; candidate < outlines.length; candidate++) {
     if (
       !canEnclose(areas, candidate, index) ||
-      (-1 !== enclosing && canEnclose(areas, candidate, enclosing))
+      (-1 !== enclosing && canEnclose(areas, candidate, enclosing)) ||
+      !boundsOverlap(bounds[candidate], probeBounds)
     ) {
       continue;
     }
@@ -359,9 +393,12 @@ function windEvenOddAsNonZero(pathData: SVGPathData): SVGPathData {
   }
 
   const outlines = contours.map(flattenContour);
+  const bounds = outlines.map(getBounds);
   const areas = outlines.map(signedArea);
   const enclosures = outlines.map((_outline, index) =>
-    0 === areas[index] ? -1 : findEnclosingContour(outlines, areas, index),
+    0 === areas[index]
+      ? -1
+      : findEnclosingContour(outlines, bounds, areas, index),
   );
   const windings: number[] = [];
   const resolveWinding = (index: number): number => {
