@@ -913,33 +913,46 @@ describe('Resolving fill and display as SVG does', () => {
     );
   });
 
-  test('should take the glyph color from a style', async () => {
-    let colors: (string | undefined)[] = [];
-    const svgFontStream = new SVGIcons2SVGFontStream({
-      round: 1e3,
-      callback: (glyphs) => {
-        colors = glyphs.map(({ color }) => color);
-      },
-    });
-    const svgIconStream = streamtest.fromChunks([
-      Buffer.from(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
-          '<path style="fill: #9F9FA9" d="M4 4H10V10H4Z" /></svg>',
-      ),
-    ]) as unknown as SVGIconStream;
-
-    svgIconStream.metadata = {
-      name: 'styled',
-      unicode: [''],
-    };
-
-    const promise = bufferStream(svgFontStream);
-
-    svgFontStream.write(svgIconStream);
-    svgFontStream.end();
-    await promise;
-
-    expect(colors).toEqual(['#9F9FA9']);
+  test.each([
+    [
+      'a style fill',
+      '<path style="fill: #9F9FA9" d="M14 14H20V20H14Z" />',
+      '#9F9FA9',
+    ],
+    [
+      'fill="INHERIT"',
+      '<g fill="#F00"><path fill="INHERIT" d="M14 14H20V20H14Z" /></g>',
+      '#F00',
+    ],
+    [
+      'an inherit through a group with no fill',
+      '<g fill="#F00"><path fill="#00F" d="M14 14H20V20H14Z" />' +
+        '<g><path fill="inherit" d="M14 4H20V10H14Z" /></g></g>',
+      '#F00',
+    ],
+    [
+      'fill="currentcolor"',
+      '<path fill="currentcolor" d="M14 14H20V20H14Z" />',
+      'black',
+    ],
+    [
+      'fill="currentColor"',
+      '<path fill="currentColor" d="M14 14H20V20H14Z" />',
+      'black',
+    ],
+    [
+      'an inherit with nothing to inherit',
+      '<path fill="inherit" d="M14 14H20V20H14Z" />',
+      undefined,
+    ],
+    [
+      'the last tag declaring a fill',
+      '<g fill="#F00"><path fill="#00F" d="M14 14H20V20H14Z" />' +
+        '<path d="M14 4H20V10H14Z" /></g>',
+      '#00F',
+    ],
+  ])('should take the glyph color from %s', async (_name, content, color) => {
+    expect(await generateGlyphColor(icon(content))).toEqual(color);
   });
 });
 
@@ -1127,6 +1140,32 @@ async function generateGlyphPath(source: string) {
     throw new Error(`No glyph path in the font: ${font}`);
   }
   return glyph[1];
+}
+
+async function generateGlyphColor(source: string) {
+  let color: string | undefined;
+  const svgFontStream = new SVGIcons2SVGFontStream({
+    round: 1e3,
+    callback: ([glyph]) => {
+      color = glyph.color;
+    },
+  });
+  const svgIconStream = streamtest.fromChunks([
+    Buffer.from(source),
+  ]) as unknown as SVGIconStream;
+
+  svgIconStream.metadata = {
+    name: 'glyph',
+    unicode: [''],
+  };
+
+  const promise = bufferStream(svgFontStream);
+
+  svgFontStream.write(svgIconStream);
+  svgFontStream.end();
+  await promise;
+
+  return color;
 }
 
 // A font is filled by the nonzero rule: a point is ink when the outline winds around it.

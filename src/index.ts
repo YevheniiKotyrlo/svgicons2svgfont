@@ -63,38 +63,6 @@ function tagShouldRender(curTag: Tag, parents: Tag[]) {
   });
 }
 
-// According to the document (http://www.w3.org/TR/SVG/painting.html#FillProperties)
-// fill <paint> none|currentColor|inherit|<color>
-//     [<icccolor>]|<funciri> (not support yet)
-function getTagColor(currTag: Tag, parents: Tag[]) {
-  const defaultColor = 'black';
-  const fillVal = getTagDeclaration(currTag, 'fill', parseDeclaredValue);
-  const parentsLength = parents.length;
-
-  if ('none' === fillVal) {
-    return 'none';
-  }
-  if ('currentColor' === fillVal) {
-    return defaultColor;
-  }
-  if ('inherit' === fillVal) {
-    if (0 === parentsLength) {
-      return defaultColor;
-    }
-    return getTagColor(
-      parents[parentsLength - 1],
-      parents.slice(0, parentsLength - 1),
-    );
-    // this might be null.
-    // For example: <svg ><path fill="inherit" /> </svg>
-    // in this case getTagColor should return null
-    // recursive call, the bottom element should be svg,
-    // and svg didn't fill color, so just return null
-  }
-
-  return fillVal;
-}
-
 // https://www.w3.org/TR/css-style-attr/
 const STYLE_COMMENT = /\/\*.*?\*\//gs;
 const STYLE_DECLARATION = /^\s*([a-z-]+)\s*:\s*(.*?)\s*(!\s*important\s*)?$/is;
@@ -171,17 +139,32 @@ function getTagFillRule(parents: readonly Tag[]): FillRule {
   return 'nonzero';
 }
 
-// fill is inherited and starts as black, so the nearest declaration decides
+// fill is inherited, so the nearest declaration decides
 // https://www.w3.org/TR/SVG2/painting.html#FillProperty
-function getTagFill(parents: readonly Tag[]): string {
+function getTagFill(parents: readonly Tag[]): string | undefined {
   for (let index = parents.length - 1; 0 <= index; index--) {
-    const fill = getTagDeclaration(parents[index], 'fill', parseKeyword);
+    const fill = getTagDeclaration(parents[index], 'fill', parseDeclaredValue);
 
-    if (fill && 'inherit' !== fill) {
+    if (fill && 'inherit' !== fill.toLowerCase()) {
       return fill;
     }
   }
-  return 'black';
+  return undefined;
+}
+
+// A tag declaring a fill gives the glyph its color, currentColor being black
+// fill <paint> none|currentColor|inherit|<color> [<icccolor>]|<funciri> (not supported yet)
+// http://www.w3.org/TR/SVG/painting.html#SpecifyingPaint
+function getTagColor(parents: readonly Tag[]): string | undefined {
+  const tag = parents[parents.length - 1];
+
+  if (undefined === getTagDeclaration(tag, 'fill', parseDeclaredValue)) {
+    return undefined;
+  }
+
+  const fill = getTagFill(parents);
+
+  return 'currentcolor' === fill?.toLowerCase() ? 'black' : fill;
 }
 
 const CURVE_STEPS = 8;
@@ -611,7 +594,7 @@ export class SVGIcons2SVGFontStream extends Transform {
           return;
         }
 
-        const painted = 'none' !== getTagFill(parents as Tag[]);
+        const painted = 'none' !== getTagFill(parents as Tag[])?.toLowerCase();
 
         // Save the view size
         if ('svg' === tag.name) {
@@ -757,10 +740,8 @@ export class SVGIcons2SVGFontStream extends Transform {
           );
         }
 
-        // According to http://www.w3.org/TR/SVG/painting.html#SpecifyingPaint
-        // Map the declared fill to the color property
         if (painted) {
-          color = getTagColor(tag as Tag, parents as Tag[]);
+          color = getTagColor(parents as Tag[]);
           if ('undefined' !== typeof color) {
             glyph.color = color;
           }
