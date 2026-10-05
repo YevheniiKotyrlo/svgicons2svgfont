@@ -98,28 +98,67 @@ function getTagColor(currTag: Tag, parents: Tag[]) {
   return fillVal;
 }
 
-// https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty
-const FILL_RULE_DECLARATION = /(?:^|;)\s*fill-rule\s*:\s*([a-z]+)\s*(?:;|$)/i;
+// https://www.w3.org/TR/css-style-attr/
+const STYLE_DECLARATION = /^\s*([a-z-]+)\s*:\s*(.*?)\s*(!\s*important\s*)?$/is;
 
-type FillRule = 'nonzero' | 'evenodd';
+// The last valid declaration wins, an important one over any other
+// https://www.w3.org/TR/css-cascade/#cascade-sort
+function getStyleDeclaration<T>(
+  style: string,
+  property: string,
+  parseValue: (value: string) => T | undefined,
+): T | undefined {
+  let declared: T | undefined;
+  let important = false;
 
-function parseFillRule(value: string | undefined): FillRule | undefined {
-  const rule = 'string' === typeof value ? value.trim().toLowerCase() : '';
+  for (const declaration of style.split(';')) {
+    const [, name = '', value = '', priority] =
+      STYLE_DECLARATION.exec(declaration) ?? [];
+    const parsed =
+      property === name.toLowerCase() ? parseValue(value) : undefined;
 
-  return 'nonzero' === rule || 'evenodd' === rule ? rule : undefined;
+    if (undefined !== parsed && (priority || !important)) {
+      declared = parsed;
+      important = Boolean(priority);
+    }
+  }
+  return declared;
 }
 
-function getTagFillRule(parents: Tag[]): FillRule {
-  for (let index = parents.length - 1; 0 <= index; index--) {
-    const { attributes } = parents[index];
-    const declared =
-      'string' === typeof attributes.style
-        ? FILL_RULE_DECLARATION.exec(attributes.style)
-        : null;
-    const rule =
-      parseFillRule(declared?.[1]) ?? parseFillRule(attributes['fill-rule']);
+// A style declaration wins over the presentation attribute
+// https://www.w3.org/TR/SVG2/styling.html#PresentationAttributes
+function getTagDeclaration<T>(
+  tag: Tag,
+  property: string,
+  parseValue: (value: string) => T | undefined,
+): T | undefined {
+  const { style, [property]: attribute } = tag.attributes;
 
-    if (rule) {
+  return (
+    ('string' === typeof style
+      ? getStyleDeclaration(style, property, parseValue)
+      : undefined) ??
+    ('string' === typeof attribute ? parseValue(attribute) : undefined)
+  );
+}
+
+// https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty
+type FillRule = 'nonzero' | 'evenodd';
+type DeclaredFillRule = FillRule | 'inherit';
+
+function parseFillRule(value: string): DeclaredFillRule | undefined {
+  const rule = value.trim().toLowerCase();
+
+  return 'nonzero' === rule || 'evenodd' === rule || 'inherit' === rule
+    ? rule
+    : undefined;
+}
+
+function getTagFillRule(parents: readonly Tag[]): FillRule {
+  for (let index = parents.length - 1; 0 <= index; index--) {
+    const rule = getTagDeclaration(parents[index], 'fill-rule', parseFillRule);
+
+    if (rule && 'inherit' !== rule) {
       return rule;
     }
   }

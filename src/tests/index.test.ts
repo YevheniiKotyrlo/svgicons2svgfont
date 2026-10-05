@@ -771,6 +771,25 @@ describe('Respecting the fill-rule', () => {
     },
   );
 
+  test.each([
+    ['style="fill-rule: evenodd; fill-rule: nonzero"', 'nonzero'],
+    ['style="fill-rule: evenodd !important; fill-rule: nonzero"', 'evenodd'],
+    [
+      'style="fill-rule: nonzero !important; fill-rule: evenodd !important"',
+      'evenodd',
+    ],
+    ['style="fill-rule: bogus; fill-rule: evenodd"', 'evenodd'],
+    ['style="FILL-RULE: EVENODD"', 'evenodd'],
+    ['style="fill-rule: inherit" fill-rule="evenodd"', 'nonzero'],
+  ])('should fill a path with %s by the %s rule', async (attributes, rule) => {
+    const icon = (declarations: string) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path ${declarations} d="M2 2H22V22H2Z M7 7H17V17H7Z"/></svg>`;
+
+    expect(await generateGlyphPath(icon(attributes))).toEqual(
+      await generateGlyphPath(icon(`fill-rule="${rule}"`)),
+    );
+  });
+
   test('should produce the same glyph every time', async () => {
     const source = fs.readFileSync(
       join('fixtures', 'icons', 'evenoddicons', 'island.svg'),
