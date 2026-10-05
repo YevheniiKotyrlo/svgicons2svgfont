@@ -171,6 +171,19 @@ function getTagFillRule(parents: readonly Tag[]): FillRule {
   return 'nonzero';
 }
 
+// fill is inherited and starts as black, so the nearest declaration decides
+// https://www.w3.org/TR/SVG2/painting.html#FillProperty
+function getTagFill(parents: readonly Tag[]): string {
+  for (let index = parents.length - 1; 0 <= index; index--) {
+    const fill = getTagDeclaration(parents[index], 'fill', parseKeyword);
+
+    if (fill && 'inherit' !== fill) {
+      return fill;
+    }
+  }
+  return 'black';
+}
+
 const CURVE_STEPS = 8;
 const CONTAINMENT_PROBES = 16;
 
@@ -598,8 +611,7 @@ export class SVGIcons2SVGFontStream extends Transform {
           return;
         }
 
-        const painted =
-          'none' !== getTagDeclaration(tag as Tag, 'fill', parseDeclaredValue);
+        const painted = 'none' !== getTagFill(parents as Tag[]);
 
         // Save the view size
         if ('svg' === tag.name) {

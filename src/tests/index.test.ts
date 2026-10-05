@@ -842,7 +842,7 @@ describe('Respecting the fill-rule', () => {
   });
 });
 
-describe('Reading fill and display from style', () => {
+describe('Resolving fill and display as SVG does', () => {
   const icon = (content: string) =>
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 4H10V10H4Z" />${content}</svg>`;
 
@@ -872,8 +872,25 @@ describe('Reading fill and display from style', () => {
       'a path in a hidden group',
       '<g style="display: none"><path d="M14 14H20V20H14Z" /></g>',
     ],
+    [
+      'a path under a group whose fill is none',
+      '<g fill="none"><path d="M14 14H20V20H14Z" /></g>',
+    ],
+    [
+      'a path under a group whose style fill is none',
+      '<g style="fill: none"><path d="M14 14H20V20H14Z" /></g>',
+    ],
+    [
+      'a path that inherits a fill of none',
+      '<g fill="none"><path fill="inherit" d="M14 14H20V20H14Z" /></g>',
+    ],
+    ['a path whose fill is NONE', '<path fill="NONE" d="M14 14H20V20H14Z" />'],
+    [
+      'a path whose style fill is NONE',
+      '<path style="fill: NONE" d="M14 14H20V20H14Z" />',
+    ],
   ])(
-    'should not draw %s its style leaves unpainted',
+    'should not draw %s, which SVG leaves unpainted',
     async (_name, content) => {
       expect(await generateGlyphPath(icon(content))).toEqual(
         await generateGlyphPath(icon('')),
@@ -881,12 +898,19 @@ describe('Reading fill and display from style', () => {
     },
   );
 
-  test('should draw a path whose style fills it over a fill="none" attribute', async () => {
-    expect(
-      await generateGlyphPath(
-        icon('<path fill="none" style="fill: #000" d="M14 14H20V20H14Z" />'),
-      ),
-    ).toEqual(await generateGlyphPath(icon('<path d="M14 14H20V20H14Z" />')));
+  test.each([
+    [
+      'a style fill over a fill="none" attribute',
+      '<path fill="none" style="fill: #000" d="M14 14H20V20H14Z" />',
+    ],
+    [
+      'its own fill under a group whose fill is none',
+      '<g fill="none"><path fill="#000" d="M14 14H20V20H14Z" /></g>',
+    ],
+  ])('should draw a path painted by %s', async (_name, content) => {
+    expect(await generateGlyphPath(icon(content))).toEqual(
+      await generateGlyphPath(icon('<path d="M14 14H20V20H14Z" />')),
+    );
   });
 
   test('should take the glyph color from a style', async () => {

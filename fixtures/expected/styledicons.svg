@@ -13,11 +13,14 @@
     <glyph glyph-name="fill"
       unicode="&#xE002;"
       horiz-adv-x="24" d="M4 20H10V14H4z" />
-    <glyph glyph-name="override"
+    <glyph glyph-name="inherited"
       unicode="&#xE003;"
+      horiz-adv-x="24" d="M4 20H10V14H4z" />
+    <glyph glyph-name="override"
+      unicode="&#xE004;"
       horiz-adv-x="24" d="M4 20H10V14H4zM14 10H20V4H14z" />
     <glyph glyph-name="shapes"
-      unicode="&#xE004;"
+      unicode="&#xE005;"
       horiz-adv-x="24" d="M4 20H10V14H4z" />
   </font>
 </defs>
