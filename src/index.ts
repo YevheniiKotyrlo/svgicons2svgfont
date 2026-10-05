@@ -99,6 +99,7 @@ function getTagColor(currTag: Tag, parents: Tag[]) {
 }
 
 // https://www.w3.org/TR/css-style-attr/
+const STYLE_COMMENT = /\/\*.*?\*\//gs;
 const STYLE_DECLARATION = /^\s*([a-z-]+)\s*:\s*(.*?)\s*(!\s*important\s*)?$/is;
 
 // The last valid declaration wins, an important one over any other
@@ -111,7 +112,7 @@ function getStyleDeclaration<T>(
   let declared: T | undefined;
   let important = false;
 
-  for (const declaration of style.split(';')) {
+  for (const declaration of style.replace(STYLE_COMMENT, '').split(';')) {
     const [, name = '', value = '', priority] =
       STYLE_DECLARATION.exec(declaration) ?? [];
     const parsed =
@@ -327,7 +328,7 @@ function locatePoint(outline: readonly Point[], probe: Point): PointLocation {
   return inside ? 'inside' : 'outside';
 }
 
-// Contours of equal area nest in drawing order, so a contour drawn twice cancels out
+// Contours of equal area nest in drawing order, so a contour repeated point for point cancels out
 function canEnclose(
   areas: readonly number[],
   candidate: number,

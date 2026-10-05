@@ -812,6 +812,8 @@ describe('Respecting the fill-rule', () => {
     ],
     ['style="fill-rule: bogus; fill-rule: evenodd"', 'evenodd'],
     ['style="FILL-RULE: EVENODD"', 'evenodd'],
+    ['style="fill-rule: /* a comment */ evenodd"', 'evenodd'],
+    ['style="fill-rule: evenodd /* ; fill-rule: nonzero */"', 'evenodd'],
     ['style="fill-rule: inherit" fill-rule="evenodd"', 'nonzero'],
   ])('should fill a path with %s by the %s rule', async (attributes, rule) => {
     const icon = (declarations: string) =>
