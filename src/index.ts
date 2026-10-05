@@ -169,11 +169,13 @@ const CURVE_STEPS = 8;
 const CONTAINMENT_PROBES = 16;
 
 interface Point {
-  x: number;
-  y: number;
+  readonly x: number;
+  readonly y: number;
 }
 
-function splitContours(commands: SVGCommand[]): SVGCommand[][] {
+type PointLocation = 'inside' | 'outside' | 'outline';
+
+function splitContours(commands: readonly SVGCommand[]): SVGCommand[][] {
   const contours: SVGCommand[][] = [];
   let contour: SVGCommand[] = [];
   let start: Point = { x: 0, y: 0 };
@@ -204,7 +206,7 @@ function splitContours(commands: SVGCommand[]): SVGCommand[][] {
   return contours;
 }
 
-function flattenContour(contour: SVGCommand[]): Point[] {
+function flattenContour(contour: readonly SVGCommand[]): Point[] {
   const points: Point[] = [];
   let x = 0;
   let y = 0;
@@ -248,7 +250,7 @@ function flattenContour(contour: SVGCommand[]): Point[] {
   return points;
 }
 
-function signedArea(points: Point[]): number {
+function signedArea(points: readonly Point[]): number {
   let area = 0;
 
   for (let index = 0; index < points.length; index++) {
@@ -260,7 +262,7 @@ function signedArea(points: Point[]): number {
   return area / 2;
 }
 
-function containsPoint(outline: Point[], probe: Point): boolean {
+function locatePoint(outline: readonly Point[], probe: Point): PointLocation {
   let inside = false;
 
   for (
@@ -272,6 +274,16 @@ function containsPoint(outline: Point[], probe: Point): boolean {
     const prior = outline[previous];
 
     if (
+      (current.x - prior.x) * (probe.y - prior.y) ===
+        (current.y - prior.y) * (probe.x - prior.x) &&
+      Math.min(prior.x, current.x) <= probe.x &&
+      probe.x <= Math.max(prior.x, current.x) &&
+      Math.min(prior.y, current.y) <= probe.y &&
+      probe.y <= Math.max(prior.y, current.y)
+    ) {
+      return 'outline';
+    }
+    if (
       current.y > probe.y !== prior.y > probe.y &&
       probe.x <
         ((prior.x - current.x) * (probe.y - current.y)) /
@@ -281,15 +293,28 @@ function containsPoint(outline: Point[], probe: Point): boolean {
       inside = !inside;
     }
   }
-  return inside;
+  return inside ? 'inside' : 'outside';
+}
+
+// Contours of equal area nest in drawing order, so a contour drawn twice cancels out
+function canEnclose(
+  areas: readonly number[],
+  candidate: number,
+  index: number,
+): boolean {
+  const candidateArea = Math.abs(areas[candidate]);
+  const ownArea = Math.abs(areas[index]);
+
+  return (
+    candidateArea > ownArea || (candidateArea === ownArea && candidate < index)
+  );
 }
 
 function findEnclosingContour(
-  outlines: Point[][],
-  areas: number[],
+  outlines: readonly (readonly Point[])[],
+  areas: readonly number[],
   index: number,
 ): number {
-  const ownArea = Math.abs(areas[index]);
   const outline = outlines[index];
   const stride = Math.max(1, Math.floor(outline.length / CONTAINMENT_PROBES));
   const probes = outline.filter(
@@ -298,21 +323,21 @@ function findEnclosingContour(
   let enclosing = -1;
 
   for (let candidate = 0; candidate < outlines.length; candidate++) {
-    const candidateArea = Math.abs(areas[candidate]);
-
     if (
-      candidate === index ||
-      candidateArea <= ownArea ||
-      (-1 !== enclosing && candidateArea >= Math.abs(areas[enclosing]))
+      !canEnclose(areas, candidate, index) ||
+      (-1 !== enclosing && canEnclose(areas, candidate, enclosing))
     ) {
       continue;
     }
 
-    const inside = probes.filter((probe) =>
-      containsPoint(outlines[candidate], probe),
-    ).length;
+    const locations = probes.map((probe) =>
+      locatePoint(outlines[candidate], probe),
+    );
+    const inside = locations.filter((location) => 'inside' === location);
+    const outside = locations.filter((location) => 'outside' === location);
 
-    if (inside * 2 > probes.length) {
+    // A point on the candidate's outline tells neither way
+    if (inside.length > outside.length || 0 === outside.length) {
       enclosing = candidate;
     }
   }

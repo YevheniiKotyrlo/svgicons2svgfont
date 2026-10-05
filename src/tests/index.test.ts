@@ -682,6 +682,38 @@ describe('Respecting the fill-rule', () => {
       ],
     ],
     [
+      'duplicated',
+      24,
+      [
+        [6, 6, true],
+        [18, 6, false],
+        [6, 18, false],
+        [18, 18, true],
+      ],
+    ],
+    [
+      'notched',
+      24,
+      [
+        [12, 4.5, false],
+        [19.5, 12, false],
+        [12, 19.5, false],
+        [4.5, 12, false],
+        [12, 12, true],
+        [4, 4, true],
+      ],
+    ],
+    [
+      'adjacent',
+      24,
+      [
+        [9, 12, false],
+        [16, 12, false],
+        [4, 12, true],
+        [12, 4, true],
+      ],
+    ],
+    [
       'nonzero',
       24,
       [
