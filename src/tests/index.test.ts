@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import fs from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { format } from 'node:util';
 
 import {
   SVGIcons2SVGFontStream,
@@ -12,6 +13,7 @@ import { SVGIconsDirStream, type SVGIconStream } from '../iconsdir.js';
 import streamtest from 'streamtest';
 import { BufferStream } from 'bufferstreams';
 import { SVGPathData } from 'svg-pathdata';
+import debug from 'debug';
 
 try {
   await mkdir(join('fixtures', 'results'));
@@ -398,6 +400,12 @@ describe('Generating fonts to files', () => {
   test('should keep the holes of evenodd paths', async () => {
     await generateFontToFile({
       fontName: 'evenoddicons',
+    });
+  });
+
+  test('should not draw never-rendered elements', async () => {
+    await generateFontToFile({
+      fontName: 'neverrenderedicons',
     });
   });
 });
@@ -834,6 +842,93 @@ describe('Respecting the fill-rule', () => {
   });
 });
 
+describe('Skipping never-rendered elements', () => {
+  const square =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+    '<path d="M4 4H10V10H4Z" /></svg>';
+
+  test.each(['clippath', 'mask', 'pattern', 'marker', 'symbol', 'defs'])(
+    'should draw the %s icon as its square alone',
+    async (name) => {
+      expect(
+        await generateGlyphPath(
+          fs.readFileSync(
+            join('fixtures', 'icons', 'neverrenderedicons', `${name}.svg`),
+            'utf8',
+          ),
+        ),
+      ).toEqual(await generateGlyphPath(square));
+    },
+  );
+
+  test('should take the glyph color from what it draws', async () => {
+    let colors: (string | undefined)[] = [];
+    const svgFontStream = new SVGIcons2SVGFontStream({
+      round: 1e3,
+      callback: (glyphs) => {
+        colors = glyphs.map(({ color }) => color);
+      },
+    });
+    const svgIconStream = fs.createReadStream(
+      join('fixtures', 'icons', 'neverrenderedicons', 'clippath.svg'),
+    ) as unknown as SVGIconStream;
+
+    svgIconStream.metadata = {
+      name: 'clippath',
+      unicode: [''],
+    };
+
+    const promise = bufferStream(svgFontStream);
+
+    svgFontStream.write(svgIconStream);
+    svgFontStream.end();
+    await promise;
+
+    expect(colors).toEqual(['#9F9FA9']);
+  });
+
+  test.each([
+    [
+      'clipPath',
+      'a clip-path attribute',
+      '<g clip-path="url(#clip)"><path d="M4 4H10V10H4Z" /></g>' +
+        '<defs><clipPath id="clip"><rect width="24" height="24" /></clipPath></defs>',
+    ],
+    [
+      'clipPath',
+      'a clip-path declaration',
+      '<g style="clip-path: url(#clip)"><path d="M4 4H10V10H4Z" /></g>' +
+        '<clipPath id="clip"><rect width="24" height="24" /></clipPath>',
+    ],
+    [
+      'mask',
+      'a mask attribute',
+      '<g mask="url(#mask)"><path d="M4 4H10V10H4Z" /></g>' +
+        '<mask id="mask"><rect width="24" height="24" fill="white" /></mask>',
+    ],
+  ])(
+    'should warn once about the %s of an icon clipped through %s',
+    async (element, _reference, content) => {
+      const warnings = await collectWarnings(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${content}</svg>`,
+      );
+
+      expect(warnings.filter((warning) => warning.includes('Found a'))).toEqual(
+        [expect.stringContaining(`Found a ${element} element in the icon`)],
+      );
+    },
+  );
+
+  test('should not warn about clipping an icon that does not clip', async () => {
+    const warnings = await collectWarnings(square);
+
+    expect(warnings).toContainEqual(expect.stringContaining('Font created'));
+    expect(warnings.filter((warning) => warning.includes('Found a'))).toEqual(
+      [],
+    );
+  });
+});
+
 describe('Providing bad glyphs', () => {
   test('should fail when not providing glyph name', async () => {
     const svgIconStream = fs.createReadStream(
@@ -1076,6 +1171,24 @@ function windingNumberAt(d: string, x: number, y: number) {
   }
   lineTo(start);
   return winding;
+}
+
+async function collectWarnings(source: string) {
+  const warnings: string[] = [];
+  const { log } = debug;
+  const namespaces = debug.disable();
+
+  debug.enable('svgicons2svgfont');
+  debug.log = (...args: unknown[]) => {
+    warnings.push(format(...args));
+  };
+  try {
+    await generateGlyphPath(source);
+  } finally {
+    debug.log = log;
+    debug.enable(namespaces);
+  }
+  return warnings;
 }
 
 async function bufferStream(readableStream: Readable) {
