@@ -400,6 +400,12 @@ describe('Generating fonts to files', () => {
       fontName: 'evenoddicons',
     });
   });
+
+  test('should read fill and display from style', async () => {
+    await generateFontToFile({
+      fontName: 'styledicons',
+    });
+  });
 });
 
 describe('Generating fonts to memory', () => {
@@ -831,6 +837,83 @@ describe('Respecting the fill-rule', () => {
     expect(await generateGlyphPath(source)).toEqual(
       await generateGlyphPath(source),
     );
+  });
+});
+
+describe('Reading fill and display from style', () => {
+  const icon = (content: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 4H10V10H4Z" />${content}</svg>`;
+
+  test.each([
+    ['a path', '<path style="fill: none" d="M14 14H20V20H14Z" />'],
+    [
+      'a rect',
+      '<rect style="fill: none" x="14" y="14" width="6" height="6" />',
+    ],
+    ['a circle', '<circle style="fill: none" cx="17" cy="17" r="3" />'],
+    [
+      'an ellipse',
+      '<ellipse style="fill: none" cx="17" cy="17" rx="3" ry="2" />',
+    ],
+    ['a polygon', '<polygon style="fill: none" points="14,14 20,14 20,20" />'],
+    [
+      'a polyline',
+      '<polyline style="fill: none" points="14,14 20,14 20,20" />',
+    ],
+    ['a line', '<line style="fill: none" x1="14" y1="14" x2="20" y2="20" />'],
+    ['a hidden path', '<path style="display: none" d="M14 14H20V20H14Z" />'],
+    [
+      'a path hidden in capitals',
+      '<path style="DISPLAY: NONE" d="M14 14H20V20H14Z" />',
+    ],
+    [
+      'a path in a hidden group',
+      '<g style="display: none"><path d="M14 14H20V20H14Z" /></g>',
+    ],
+  ])(
+    'should not draw %s its style leaves unpainted',
+    async (_name, content) => {
+      expect(await generateGlyphPath(icon(content))).toEqual(
+        await generateGlyphPath(icon('')),
+      );
+    },
+  );
+
+  test('should draw a path whose style fills it over a fill="none" attribute', async () => {
+    expect(
+      await generateGlyphPath(
+        icon('<path fill="none" style="fill: #000" d="M14 14H20V20H14Z" />'),
+      ),
+    ).toEqual(await generateGlyphPath(icon('<path d="M14 14H20V20H14Z" />')));
+  });
+
+  test('should take the glyph color from a style', async () => {
+    let colors: (string | undefined)[] = [];
+    const svgFontStream = new SVGIcons2SVGFontStream({
+      round: 1e3,
+      callback: (glyphs) => {
+        colors = glyphs.map(({ color }) => color);
+      },
+    });
+    const svgIconStream = streamtest.fromChunks([
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+          '<path style="fill: #9F9FA9" d="M4 4H10V10H4Z" /></svg>',
+      ),
+    ]) as unknown as SVGIconStream;
+
+    svgIconStream.metadata = {
+      name: 'styled',
+      unicode: [''],
+    };
+
+    const promise = bufferStream(svgFontStream);
+
+    svgFontStream.write(svgIconStream);
+    svgFontStream.end();
+    await promise;
+
+    expect(colors).toEqual(['#9F9FA9']);
   });
 });
 

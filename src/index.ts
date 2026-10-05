@@ -38,10 +38,7 @@ function tagShouldRender(curTag: Tag, parents: Tag[]) {
   let values;
 
   return !parents.some((tag) => {
-    if (
-      'undefined' !== typeof tag.attributes.display &&
-      'none' === tag.attributes.display.toLowerCase()
-    ) {
+    if ('none' === getTagDeclaration(tag, 'display', parseKeyword)) {
       return true;
     }
     if (
@@ -71,7 +68,7 @@ function tagShouldRender(curTag: Tag, parents: Tag[]) {
 //     [<icccolor>]|<funciri> (not support yet)
 function getTagColor(currTag: Tag, parents: Tag[]) {
   const defaultColor = 'black';
-  const fillVal = currTag.attributes.fill;
+  const fillVal = getTagDeclaration(currTag, 'fill', parseDeclaredValue);
   const parentsLength = parents.length;
 
   if ('none' === fillVal) {
@@ -140,6 +137,14 @@ function getTagDeclaration<T>(
       : undefined) ??
     ('string' === typeof attribute ? parseValue(attribute) : undefined)
   );
+}
+
+function parseDeclaredValue(value: string): string | undefined {
+  return value.trim() || undefined;
+}
+
+function parseKeyword(value: string): string | undefined {
+  return value.trim().toLowerCase() || undefined;
 }
 
 // https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty
@@ -592,6 +597,9 @@ export class SVGIcons2SVGFontStream extends Transform {
           return;
         }
 
+        const painted =
+          'none' !== getTagDeclaration(tag as Tag, 'fill', parseDeclaredValue);
+
         // Save the view size
         if ('svg' === tag.name) {
           if ('viewBox' in tag.attributes) {
@@ -643,7 +651,7 @@ export class SVGIcons2SVGFontStream extends Transform {
           warn(
             `🤷 - Found a clipPath element in the icon "${glyph.name}" the result may be different than expected.`,
           );
-        } else if ('rect' === tag.name && 'none' !== tag.attributes.fill) {
+        } else if ('rect' === tag.name && painted) {
           glyph.paths?.push(
             applyTransform(
               SVGShapes.createRect(
@@ -668,7 +676,7 @@ export class SVGIcons2SVGFontStream extends Transform {
               ).encode(),
             ),
           );
-        } else if ('line' === tag.name && 'none' !== tag.attributes.fill) {
+        } else if ('line' === tag.name && painted) {
           warn(
             `🤷 - Found a line element in the icon "${glyph.name}" the result could be different than expected.`,
           );
@@ -682,7 +690,7 @@ export class SVGIcons2SVGFontStream extends Transform {
               ]).encode(),
             ),
           );
-        } else if ('polyline' === tag.name && 'none' !== tag.attributes.fill) {
+        } else if ('polyline' === tag.name && painted) {
           warn(
             `🤷 - Found a polyline element in the icon "${glyph.name}" the result could be different than expected.`,
           );
@@ -696,7 +704,7 @@ export class SVGIcons2SVGFontStream extends Transform {
               ).encode(),
             ),
           );
-        } else if ('polygon' === tag.name && 'none' !== tag.attributes.fill) {
+        } else if ('polygon' === tag.name && painted) {
           glyph.paths?.push(
             applyTransform(
               SVGShapes.createPolygon(
@@ -707,10 +715,7 @@ export class SVGIcons2SVGFontStream extends Transform {
               ).encode(),
             ),
           );
-        } else if (
-          ['circle', 'ellipse'].includes(tag.name) &&
-          'none' !== tag.attributes.fill
-        ) {
+        } else if (['circle', 'ellipse'].includes(tag.name) && painted) {
           glyph.paths?.push(
             applyTransform(
               SVGShapes.createEllipse(
@@ -729,11 +734,7 @@ export class SVGIcons2SVGFontStream extends Transform {
               ).encode(),
             ),
           );
-        } else if (
-          'path' === tag.name &&
-          tag.attributes.d &&
-          'none' !== tag.attributes.fill
-        ) {
+        } else if ('path' === tag.name && tag.attributes.d && painted) {
           const pathData = applyTransform(tag.attributes.d as string);
 
           glyph.paths?.push(
@@ -744,8 +745,8 @@ export class SVGIcons2SVGFontStream extends Transform {
         }
 
         // According to http://www.w3.org/TR/SVG/painting.html#SpecifyingPaint
-        // Map attribute fill to color property
-        if ('none' !== tag.attributes.fill) {
+        // Map the declared fill to the color property
+        if (painted) {
           color = getTagColor(tag as Tag, parents as Tag[]);
           if ('undefined' !== typeof color) {
             glyph.color = color;
